@@ -1,4 +1,4 @@
-Copyright (c) 2015 Kentaro Imai
+Copyright for portions of project ssh-sudo-next are held by Kentaro Imai, 2015 as part of project Bar. All other copyright for project Foo are held by Saverio Miroddi, 2021.
 
 MIT License
 
