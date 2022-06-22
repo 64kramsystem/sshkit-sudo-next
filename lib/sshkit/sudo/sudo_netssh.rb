@@ -96,6 +96,10 @@ module SSHKit
       end
 
       def execute_command(cmd)
+# Put on a single line, for convenience, but will generate double-quote strings that need to be processed,
+# ie. `"foo\nbar"`` -> `$'foo\bar'``
+#
+IO.write('/tmp/cap_commands.log', cmd.to_s.gsub(/\r?\n/, '\n') + "\n", mode: 'a')
         output.log_command_start(cmd)
         cmd.started = true
         exit_status = nil
