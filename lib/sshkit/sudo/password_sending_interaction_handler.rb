@@ -20,6 +20,7 @@ module SSHKit
 
         if data =~ PASSWORD_PROMPT_REGEX
           pass = @servers_password
+puts "CP>>> #{pass.inspect}"
           channel.send_data(pass)
         end
       end

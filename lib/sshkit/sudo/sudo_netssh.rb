@@ -96,6 +96,7 @@ module SSHKit
       end
 
       def execute_command(cmd)
+puts "CC>>> #{cmd}"
         output.log_command_start(cmd)
         cmd.started = true
         exit_status = nil
@@ -103,18 +104,19 @@ module SSHKit
           ssh.open_channel do |chan|
             chan.request_pty
             prepared_command = cmd.to_command
-
             if self.class.config.commands_log
               IO.write(self.class.config.commands_log, prepared_command + "\n", mode: 'a')
             end
 
             chan.exec prepared_command do |_ch, _success|
               chan.on_data do |ch, data|
+puts "SD>>> #{data}"
                 cmd.on_stdout(ch, data)
                 skip_stdout_logging = SKIP_STDOUT_LOGGING_PATTERNS.any? { |pattern| data =~ pattern }
                 output.log_command_data(cmd, :stdout, data) unless skip_stdout_logging
               end
               chan.on_extended_data do |ch, _type, data|
+puts "SED>>> #{data}"
                 cmd.on_stderr(ch, data)
                 output.log_command_data(cmd, :stderr, data)
               end
