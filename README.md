@@ -2,9 +2,4 @@
 
 Fork of the [SSHKit::Sudo](https://github.com/kentaroi/sshkit-sudo.git) project, with significant cleanups and some improvements.
 
-As the original project, this gem allows:
-
-- sudo commands with password support;
-- perform all the tasks of a given session (eg. a whole deploy) as a specified user.
-
-We're in the process of preparing and releasing thorough documentation (estimated time: beginning of May/2021).
+This gem provides sudo password handling for SSHKit: when a remote command emits a `[sudo] password for <user>:` prompt, the configured password is sent automatically, so commands invoking `sudo` (whether via `as :root do … end` blocks or by literally including `sudo` in the command) don't require interactive password entry.

@@ -69,27 +69,21 @@ module SSHKit
 
         env = (@env || {})
 
-        user = @user || self.class.config.owner
-
-        # As general Linux practice, switching user is not enough - some variables need to be updated
-        # as well.
-        # For an explanation, see https://saveriomiroddi.github.io/Chef-properly-run-a-resource-as-alternate-user.
-        #
-        user_home = user == 'root' ? '/root' : "/home/#{user}"
-        env = env.merge(user: user, home: user_home)
-
-        # Sshkit::Command#user runs commands in a non-login shell, so that variables are not inherited.
-        # We can workaround this by setting them in the env, which is `export`ed, however, only the
-        # specified ones are. Since `RAILS_ENV` is common, we pass it.
-        #
-        env = env.merge(rails_env: fetch(:rails_env))
+        if @user
+          # As general Linux practice, switching user is not enough - some variables need to be updated
+          # as well.
+          # For an explanation, see https://saveriomiroddi.github.io/Chef-properly-run-a-resource-as-alternate-user.
+          #
+          user_home = @user == 'root' ? '/root' : "/home/#{@user}"
+          env = env.merge(user: @user, home: user_home, rails_env: fetch(:rails_env))
+        end
 
         SSHKit::Command.new(*args, options.merge(
           {
             in: pwd_path,
             env: env,
             host: @host,
-            user: user,
+            user: @user,
             group: @group,
           }
         ))
