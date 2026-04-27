@@ -6,7 +6,7 @@ require 'sshkit/sudo/version'
 Gem::Specification.new do |spec|
   spec.name          = "sshkit-sudo-next"
   spec.version       = SSHKit::Sudo::VERSION
-  spec.date          = "2021-04-22"
+  spec.date          = "2026-04-27"
   spec.authors       = ["Saverio Miroddi"]
   spec.email         = ["saverio.pub2@gmail.com"]
   spec.summary       = %q{SSHKit extension, for sudo operation with password input.}
