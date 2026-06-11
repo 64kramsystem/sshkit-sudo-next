@@ -10,8 +10,7 @@ Gem::Specification.new do |spec|
   spec.authors       = ["Saverio Miroddi"]
   spec.email         = ["saverio.pub2@gmail.com"]
   spec.summary       = %q{SSHKit extension, for sudo operation with password input.}
-  spec.description   = %q{SSHKit extension, for sudo operation with password input.}
-  spec.homepage      = ""
+  spec.homepage      = "https://github.com/64kramsystem/sshkit-sudo-next"
   spec.license       = "MIT"
 
   spec.files         = `git ls-files -z`.split("\x0")
