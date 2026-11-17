@@ -10,5 +10,22 @@ module SSHKit
       return yield if env_string.empty?
       "( export #{env_string} ; #{yield} )"
     end
+  
+    # The SudoNetssh backend stores redacted output, while the interaction handler must see the raw
+    # output (Command#on_stdout/on_stderr would pass it the redacted one).
+    #
+    def interact(stream_name, data, channel)
+      call_interaction_handler(stream_name, data, channel)
+    end
+
+    def store_stdout(data)
+      @stdout = data
+      @full_stdout += data
+    end
+
+    def store_stderr(data)
+      @stderr = data
+      @full_stderr += data
+    end
   end
 end

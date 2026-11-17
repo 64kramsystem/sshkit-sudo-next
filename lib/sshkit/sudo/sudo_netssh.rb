@@ -1,5 +1,6 @@
 require 'sshkit'
 require_relative 'password_sending_interaction_handler'
+require_relative 'stream_redactor'
 require_relative 'command'
 
 module SSHKit
@@ -8,12 +9,11 @@ module SSHKit
     # can be implemented, if needed, as Configuration attributes.
     #
     class SudoNetssh < Netssh
-      PASSWORD_PROMPT_REGEX = /\[sudo\] password for \S+\:/
 
       SKIP_STDOUT_LOGGING_PATTERNS = [
         /^\r\n$/,
-        PASSWORD_PROMPT_REGEX, # Skipping this removes context from the wrong password prompt, but it's
-                               # still understandable.
+        # Skipping this removes context from the wrong password prompt, but it's still understandable.
+        SSHKit::Sudo::PasswordSendingInteractionHandler::DEFAULT_PASSWORD_PROMPT_REGEX,
       ]
 
       class << self
@@ -30,7 +30,7 @@ module SSHKit
         #
         def config
           @config ||= Class.new(Netssh::Configuration) do
-            attr_accessor :owner, :servers_password, :commands_log
+            attr_accessor :owner, :servers_password, :commands_log, :password_prompt_regex
           end.new
         end
       end
@@ -38,14 +38,20 @@ module SSHKit
       def initialize(*args, &block)
         super
 
-        @interaction_handler = SSHKit::Sudo::PasswordSendingInteractionHandler.new(self.class.config.servers_password + "\n")
+        # A single snapshot, so that the sent and the redacted passwords can't diverge.
+        @password = normalize_password(self.class.config.servers_password)
+        @prompt_regex = self.class.config.password_prompt_regex ||
+          SSHKit::Sudo::PasswordSendingInteractionHandler::DEFAULT_PASSWORD_PROMPT_REGEX
+        @interaction_handler = SSHKit::Sudo::PasswordSendingInteractionHandler.new(
+          @password + "\n", prompt_regex: @prompt_regex
+        )
       end
 
       def capture(*args)
         # To ensure that we clean out the sudo part when the results are returned,
         # otherwise the commands will be corrupt.
         #
-        super.gsub(PASSWORD_PROMPT_REGEX, '')
+        super.gsub(/(?:#{@prompt_regex})[ \t]*/, '')
       end
 
       # Required because the uploaded file is owned by the SSH user, not the owner.
@@ -63,6 +69,30 @@ module SSHKit
       end
 
       private
+
+      # The configured value may carry trailing newlines (once, one was required).
+      #
+      def normalize_password(value)
+        password = value.to_s.sub(/[\r\n]+\z/, '')
+        raise ArgumentError, "The servers password can't contain newlines" if password =~ /[\r\n]/
+
+        password
+      end
+
+      def handle_stdout(cmd, data)
+        return if data.empty?
+
+        cmd.store_stdout(data)
+        skip_stdout_logging = SKIP_STDOUT_LOGGING_PATTERNS.any? { |pattern| data =~ pattern }
+        output.log_command_data(cmd, :stdout, data) unless skip_stdout_logging
+      end
+
+      def handle_stderr(cmd, data)
+        return if data.empty?
+
+        cmd.store_stderr(data)
+        output.log_command_data(cmd, :stderr, data)
+      end
 
       def command(args, options)
         options[:interaction_handler] ||= @interaction_handler
@@ -93,50 +123,60 @@ module SSHKit
         output.log_command_start(cmd)
         cmd.started = true
         exit_status = nil
-        with_ssh do |ssh|
-          ssh.open_channel do |chan|
-            chan.request_pty
-            prepared_command = cmd.to_command
+        # Defense in depth: the password must never reach logs, captures or exception messages,
+        # even if echoed back (PTY echo), so output is redacted before SSHKit stores or logs it.
+        # The interaction handler is fed the raw output, on the live channel.
+        stdout_redactor = SSHKit::Sudo::StreamRedactor.new(@password)
+        stderr_redactor = SSHKit::Sudo::StreamRedactor.new(@password)
+        begin
+          with_ssh do |ssh|
+            ssh.open_channel do |chan|
+              chan.request_pty
+              prepared_command = cmd.to_command
 
-            if self.class.config.commands_log
-              IO.write(self.class.config.commands_log, prepared_command + "\n", mode: 'a')
-            end
+              if self.class.config.commands_log
+                IO.write(self.class.config.commands_log, prepared_command + "\n", mode: 'a')
+              end
 
-            chan.exec prepared_command do |_ch, _success|
-              chan.on_data do |ch, data|
-                cmd.on_stdout(ch, data)
-                skip_stdout_logging = SKIP_STDOUT_LOGGING_PATTERNS.any? { |pattern| data =~ pattern }
-                output.log_command_data(cmd, :stdout, data) unless skip_stdout_logging
+              chan.exec prepared_command do |_ch, _success|
+                chan.on_data do |ch, data|
+                  cmd.interact(:stdout, data, ch)
+                  handle_stdout(cmd, stdout_redactor.redact(data))
+                end
+                chan.on_extended_data do |ch, _type, data|
+                  cmd.interact(:stderr, data, ch)
+                  handle_stderr(cmd, stderr_redactor.redact(data))
+                end
+                chan.on_request("exit-status") do |_ch, data|
+                  exit_status = data.read_long
+                end
+                #chan.on_request("exit-signal") do |ch, data|
+                #  # TODO: This gets called if the program is killed by a signal
+                #  # might also be a worthwhile thing to report
+                #  exit_signal = data.read_string.to_i
+                #  warn ">>> " + exit_signal.inspect
+                #  output.log_command_killed(cmd, exit_signal)
+                #end
+                chan.on_open_failed do |_ch|
+                  # TODO: What do do here?
+                  # I think we should raise something
+                end
+                chan.on_process do |_ch|
+                  # TODO: I don't know if this is useful
+                end
+                chan.on_eof do |_ch|
+                  # TODO: chan sends EOF before the exit status has been
+                  # writtend
+                end
               end
-              chan.on_extended_data do |ch, _type, data|
-                cmd.on_stderr(ch, data)
-                output.log_command_data(cmd, :stderr, data)
-              end
-              chan.on_request("exit-status") do |_ch, data|
-                exit_status = data.read_long
-              end
-              #chan.on_request("exit-signal") do |ch, data|
-              #  # TODO: This gets called if the program is killed by a signal
-              #  # might also be a worthwhile thing to report
-              #  exit_signal = data.read_string.to_i
-              #  warn ">>> " + exit_signal.inspect
-              #  output.log_command_killed(cmd, exit_signal)
-              #end
-              chan.on_open_failed do |_ch|
-                # TODO: What do do here?
-                # I think we should raise something
-              end
-              chan.on_process do |_ch|
-                # TODO: I don't know if this is useful
-              end
-              chan.on_eof do |_ch|
-                # TODO: chan sends EOF before the exit status has been
-                # writtend
-              end
+              chan.wait
             end
-            chan.wait
+            ssh.loop
           end
-          ssh.loop
+          handle_stdout(cmd, stdout_redactor.flush)
+          handle_stderr(cmd, stderr_redactor.flush)
+        ensure
+          @interaction_handler.forget(cmd)
         end
         # Set exit_status and log the result upon completion
         if exit_status
